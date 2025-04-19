@@ -1,0 +1,486 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess with Agent Suggestions</title>
+    <!-- Chessboard.js and Chess.js libraries -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            display: flex;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .game-container {
+            flex: 1;
+            margin-right: 20px;
+        }
+        
+        .analysis-container {
+            flex: 1;
+            background-color: white;
+            border-radius: 5px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        #myBoard {
+            max-width: 500px;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        .move-list {
+            margin-top: 20px;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        
+        .move-list span {
+            margin-right: 10px;
+            font-family: monospace;
+        }
+        
+        .suggestion-box {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+        }
+        
+        .top-move {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .move-quality {
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .excellent { background-color: #4CAF50; color: white; }
+        .good { background-color: #8BC34A; color: white; }
+        .inaccuracy { background-color: #FFC107; color: black; }
+        .mistake { background-color: #FF9800; color: white; }
+        .blunder { background-color: #F44336; color: white; }
+        
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="game-container">
+            <h1>Chess Game with Agent Suggestions</h1>
+            <div id="myBoard"></div>
+            <div class="button-container">
+                <button id="newGameBtn">New Game</button>
+                <button id="getSuggestionBtn">Get Suggestion</button>
+                <button id="undoBtn">Undo Move</button>
+                <button id="flipBtn">Flip Board</button>
+            </div>
+            <div class="move-list" id="moveList">
+                <h3>Move History</h3>
+                <div id="moves"></div>
+            </div>
+        </div>
+        
+        <div class="analysis-container">
+            <h2>Analysis & Suggestions</h2>
+            <div id="loading" class="loader" style="display: none;"></div>
+            <div id="suggestionContent">
+                <div class="suggestion-box">
+                    <h3>Agent Analysis</h3>
+                    <p id="geminiAnalysis">Make a move to see analysis...</p>
+                </div>
+                
+                <div class="suggestion-box">
+                    <h3>Top Recommended Moves</h3>
+                    <div id="topMoves">
+                        <p>No analysis yet.</p>
+                    </div>
+                </div>
+                
+                <div class="suggestion-box">
+                    <h3>Your Move Analysis</h3>
+                    <div id="humanMoveAnalysis">
+                        <p>No moves played yet.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let board = null;
+        let game = new Chess();
+        let gameId = null;
+        let lastHumanMove = null;
+        
+        // Initialize the board
+        function initBoard() {
+            const config = {
+                draggable: true,
+                position: 'start',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            };
+            board = Chessboard('myBoard', config);
+        }
+        
+        // Check if a move is valid
+        function onDragStart(source, piece, position, orientation) {
+            // Do not pick up pieces if the game is over
+            if (game.game_over()) return false;
+            
+            // Only pick up pieces for the side to move
+            if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+            
+            // Only allow the human player (white) to move pieces
+            return game.turn() === 'w';
+        }
+        
+        // Update the board position after the piece snap
+        function onSnapEnd() {
+            board.position(game.fen());
+        }
+        
+        // Handle the drop event
+        function onDrop(source, target) {
+            // See if the move is legal
+            const move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Always promote to a queen for simplicity
+            });
+            
+            // If illegal move, snap back
+            if (move === null) return 'snapback';
+            
+            // Store the move
+            lastHumanMove = move.from + move.to;
+            
+            // Send the move to the server
+            sendMoveToServer(lastHumanMove);
+            
+            return ''; // Legal move, don't snapback
+        }
+        
+        // Send the move to the server
+        function sendMoveToServer(move) {
+            // Show loading indicator
+            $('#loading').show();
+            $('#suggestionContent').hide();
+            
+            fetch('/api/make_move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    game_id: gameId,
+                    move: move
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading indicator
+                $('#loading').hide();
+                $('#suggestionContent').show();
+                
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                
+                // Update the board with bot's move
+                if (data.bot_move) {
+                    game.move({
+                        from: data.bot_move.substr(0, 2),
+                        to: data.bot_move.substr(2, 2),
+                        promotion: data.bot_move.length > 4 ? data.bot_move.substr(4, 1) : undefined
+                    });
+                    board.position(game.fen());
+                    
+                    // Update move list
+                    updateMoveList(data.human_move, data.bot_move_san);
+                }
+                
+                // Update the suggestion area
+                updateSuggestions(data.suggestion);
+                
+                // Check game status
+                checkGameStatus(data.game_status);
+            })
+            .catch(error => {
+                $('#loading').hide();
+                $('#suggestionContent').show();
+                console.error('Error:', error);
+                alert('Error communicating with the server');
+            });
+        }
+        
+        // Start a new game
+        function startNewGame() {
+            // Reset the board and game
+            game = new Chess();
+            board.position('start');
+            
+            // Clear move history and suggestions
+            $('#moves').empty();
+            $('#geminiAnalysis').text('Make a move to see analysis...');
+            $('#topMoves').html('<p>No analysis yet.</p>');
+            $('#humanMoveAnalysis').html('<p>No moves played yet.</p>');
+            
+            // Create new game on server
+            fetch('/api/new_game', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                gameId = data.game_id;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error starting new game');
+            });
+        }
+        
+        // Get suggestion for current position
+        function getSuggestion() {
+            if (!gameId) {
+                alert('Please start a new game first');
+                return;
+            }
+            
+            // Show loading indicator
+            $('#loading').show();
+            $('#suggestionContent').hide();
+            
+            fetch('/api/get_suggestion', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    fen: game.fen()
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading indicator
+                $('#loading').hide();
+                $('#suggestionContent').show();
+                
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                
+                // Update only the analysis parts
+                if (data.suggestion) {
+                    $('#geminiAnalysis').html(data.suggestion.gemini_analysis.replace(/\n/g, '<br>'));
+                    
+                    let topMovesHtml = '';
+                    if (data.suggestion.top_moves && data.suggestion.top_moves.length > 0) {
+                        data.suggestion.top_moves.forEach((move, index) => {
+                            topMovesHtml += `
+                                <div class="top-move">
+                                    <span>#${index + 1}: ${move.san}</span>
+                                    <span>Eval: ${move.engine_evaluation ? move.engine_evaluation.toFixed(2) : 'N/A'}</span>
+                                </div>
+                            `;
+                        });
+                    } else {
+                        topMovesHtml = '<p>No recommended moves available.</p>';
+                    }
+                    $('#topMoves').html(topMovesHtml);
+                }
+            })
+            .catch(error => {
+                $('#loading').hide();
+                $('#suggestionContent').show();
+                console.error('Error:', error);
+                alert('Error getting suggestion');
+            });
+        }
+        
+        // Update move list display
+        function updateMoveList(humanMove, botMoveSan) {
+            const moveNumber = Math.ceil(game.history().length / 2);
+            let html = `<span>${moveNumber}. ${humanMove}</span>`;
+            if (botMoveSan) {
+                html += `<span>${botMoveSan}</span>`;
+            }
+            $('#moves').append(`<div>${html}</div>`);
+        }
+        
+        // Update suggestion display
+        function updateSuggestions(suggestion) {
+            if (!suggestion) return;
+            
+            // Update Gemini analysis
+            if (suggestion.gemini_analysis) {
+                $('#geminiAnalysis').html(suggestion.gemini_analysis.replace(/\n/g, '<br>'));
+            }
+            
+            // Update top moves
+            let topMovesHtml = '';
+            if (suggestion.top_moves && suggestion.top_moves.length > 0) {
+                suggestion.top_moves.forEach((move, index) => {
+                    topMovesHtml += `
+                        <div class="top-move">
+                            <span>#${index + 1}: ${move.san}</span>
+                            <span>Eval: ${move.engine_evaluation ? move.engine_evaluation.toFixed(2) : 'N/A'}</span>
+                        </div>
+                    `;
+                });
+            } else {
+                topMovesHtml = '<p>No recommended moves available.</p>';
+            }
+            $('#topMoves').html(topMovesHtml);
+            
+            // Update human move analysis
+            let humanAnalysisHtml = '';
+            if (suggestion.human_move_analysis && !suggestion.human_move_analysis.error) {
+                const analysis = suggestion.human_move_analysis;
+                const qualityClass = analysis.quality ? analysis.quality.toLowerCase() : '';
+                
+                humanAnalysisHtml = `
+                    <div>
+                        <p>Your move: <strong>${analysis.san}</strong></p>
+                        <p>Quality: <span class="move-quality ${qualityClass}">${analysis.quality || 'Unknown'}</span></p>
+                        <p>Difference from best move: ${analysis.diff_from_best ? analysis.diff_from_best.toFixed(2) : 'N/A'}</p>
+                        <p>Rank among considered moves: ${analysis.rank || 'N/A'}</p>
+                    </div>
+                `;
+            } else {
+                humanAnalysisHtml = '<p>No analysis available for your move.</p>';
+            }
+            $('#humanMoveAnalysis').html(humanAnalysisHtml);
+        }
+        
+        // Check game status and display appropriate message
+        function checkGameStatus(status) {
+            if (!status) return;
+            
+            if (status.is_game_over) {
+                let message = 'Game over! ';
+                if (status.is_checkmate) {
+                    message += status.result === '1-0' ? 'You win by checkmate!' : 'Bot wins by checkmate!';
+                } else if (status.is_stalemate) {
+                    message += 'Draw by stalemate.';
+                } else {
+                    message += `Result: ${status.result}`;
+                }
+                
+                setTimeout(() => {
+                    alert(message);
+                }, 500);
+            } else if (status.is_check) {
+                const inCheck = game.turn() === 'w' ? 'You are' : 'Bot is';
+                setTimeout(() => {
+                    alert(`${inCheck} in check!`);
+                }, 500);
+            }
+        }
+        
+        // Handle undo move
+        function undoMove() {
+            // Undo twice to take back both the human and bot moves
+            game.undo();
+            game.undo();
+            board.position(game.fen());
+            
+            // Remove the last move from the display
+            const movesList = $('#moves').children();
+            if (movesList.length > 0) {
+                movesList.last().remove();
+            }
+            
+            // Clear analysis
+            $('#geminiAnalysis').text('Analysis cleared. Make a move to get new analysis.');
+            $('#topMoves').html('<p>No analysis available.</p>');
+            $('#humanMoveAnalysis').html('<p>No moves played yet.</p>');
+        }
+        
+        // Flip the board orientation
+        function flipBoard() {
+            board.flip();
+        }
+        
+        // Initialize when the page loads
+        $(document).ready(function() {
+            initBoard();
+            startNewGame();
+            
+            // Set up button handlers
+            $('#newGameBtn').on('click', startNewGame);
+            $('#getSuggestionBtn').on('click', getSuggestion);
+            $('#undoBtn').on('click', undoMove);
+            $('#flipBtn').on('click', flipBoard);
+        });
+    </script>
+</body>
+</html>
