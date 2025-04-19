@@ -1,10 +1,11 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chess with Agent Suggestions</title>
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css">
     <!-- Chessboard.js and Chess.js libraries -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
@@ -22,6 +23,7 @@
         
         .container {
             display: flex;
+            flex-wrap: wrap;
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
@@ -29,15 +31,29 @@
         
         .game-container {
             flex: 1;
+            min-width: 300px;
             margin-right: 20px;
+            margin-bottom: 20px;
         }
         
         .analysis-container {
             flex: 1;
+            min-width: 300px;
             background-color: white;
             border-radius: 5px;
             padding: 20px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .debate-container {
+            flex: 2;
+            min-width: 100%;
+            background-color: white;
+            border-radius: 5px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-top: 20px;
         }
         
         #myBoard {
@@ -119,6 +135,72 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
+        /* Debate Panel Styles */
+        .debate-panel {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .card-header {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .card-body {
+            padding: 15px;
+        }
+        
+        .form-control {
+            display: block;
+            width: 100%;
+            padding: 0.375rem 0.75rem;
+            font-size: 1rem;
+            font-weight: 400;
+            line-height: 1.5;
+            color: #212529;
+            background-color: #fff;
+            background-clip: padding-box;
+            border: 1px solid #ced4da;
+            border-radius: 0.25rem;
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .btn-primary {
+            color: #fff;
+            background-color: #0d6efd;
+            border-color: #0d6efd;
+        }
+        
+        .d-none {
+            display: none !important;
+        }
+        
+        .spinner-border {
+            display: inline-block;
+            width: 2rem;
+            height: 2rem;
+            vertical-align: -0.125em;
+            border: 0.25em solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: 0.75s linear infinite spinner-border;
+        }
+        
+        @keyframes spinner-border {
+            to { transform: rotate(360deg); }
+        }
+        
+        .debate-text {
+            margin-top: 15px;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
@@ -162,6 +244,49 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Debate Panel Section -->
+        <div class="debate-container">
+            <div class="debate-panel card">
+                <div class="card-header">
+                    <h4>Chess Masters Debate</h4>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="debateType">Debate Type:</label>
+                        <select class="form-control mb-2" id="debateType">
+                            <option value="position">Current Position</option>
+                            <option value="move">Last Move</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="perspectives">Number of Perspectives:</label>
+                        <select class="form-control mb-2" id="perspectives">
+                            <option value="2">2 Masters</option>
+                            <option value="3">3 Masters</option>
+                            <option value="4">4 Masters</option>
+                        </select>
+                    </div>
+                    
+                    <button class="btn btn-primary" id="generateDebate">Generate Debate</button>
+                    
+                    <div class="mt-3">
+                        <div class="debate-loading d-none">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span class="ml-2">Generating chess masters debate...</span>
+                        </div>
+                        
+                        <div class="debate-content mt-3">
+                            <h5 class="debate-title"></h5>
+                            <div class="debate-text"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -169,6 +294,7 @@
         let game = new Chess();
         let gameId = null;
         let lastHumanMove = null;
+        let lastPositionBeforeMove = null;
         
         // Initialize the board
         function initBoard() {
@@ -177,7 +303,8 @@
                 position: 'start',
                 onDragStart: onDragStart,
                 onDrop: onDrop,
-                onSnapEnd: onSnapEnd
+                onSnapEnd: onSnapEnd,
+                pieceTheme: 'https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/wikipedia/{piece}.png'
             };
             board = Chessboard('myBoard', config);
         }
@@ -204,6 +331,9 @@
         
         // Handle the drop event
         function onDrop(source, target) {
+            // Store the current position before the move
+            lastPositionBeforeMove = game.fen();
+            
             // See if the move is legal
             const move = game.move({
                 from: source,
@@ -215,10 +345,10 @@
             if (move === null) return 'snapback';
             
             // Store the move
-            lastHumanMove = move.from + move.to;
+            lastHumanMove = move.san;
             
             // Send the move to the server
-            sendMoveToServer(lastHumanMove);
+            sendMoveToServer(source + target);
             
             return ''; // Legal move, don't snapback
         }
@@ -260,7 +390,7 @@
                     board.position(game.fen());
                     
                     // Update move list
-                    updateMoveList(data.human_move, data.bot_move_san);
+                    updateMoveList(data.human_move_san, data.bot_move_san);
                 }
                 
                 // Update the suggestion area
@@ -282,6 +412,8 @@
             // Reset the board and game
             game = new Chess();
             board.position('start');
+            lastPositionBeforeMove = game.fen();
+            lastHumanMove = null;
             
             // Clear move history and suggestions
             $('#moves').empty();
@@ -367,9 +499,9 @@
         }
         
         // Update move list display
-        function updateMoveList(humanMove, botMoveSan) {
+        function updateMoveList(humanMoveSan, botMoveSan) {
             const moveNumber = Math.ceil(game.history().length / 2);
-            let html = `<span>${moveNumber}. ${humanMove}</span>`;
+            let html = `<span>${moveNumber}. ${humanMoveSan}</span>`;
             if (botMoveSan) {
                 html += `<span>${botMoveSan}</span>`;
             }
@@ -452,6 +584,7 @@
             game.undo();
             game.undo();
             board.position(game.fen());
+            lastPositionBeforeMove = game.fen();
             
             // Remove the last move from the display
             const movesList = $('#moves').children();
@@ -480,6 +613,97 @@
             $('#getSuggestionBtn').on('click', getSuggestion);
             $('#undoBtn').on('click', undoMove);
             $('#flipBtn').on('click', flipBoard);
+            
+            // Debate panel functionality
+            const generateDebateBtn = document.getElementById('generateDebate');
+            const debateType = document.getElementById('debateType');
+            const perspectives = document.getElementById('perspectives');
+            const debateTitle = document.querySelector('.debate-title');
+            const debateText = document.querySelector('.debate-text');
+            const debateLoading = document.querySelector('.debate-loading');
+            
+            // Get available debate styles
+            fetch('/api/get_debate_styles')
+            .then(response => response.json())
+            .then(data => {
+                console.log('Available debate styles:', data.styles);
+            })
+            .catch(error => console.error('Error fetching debate styles:', error));
+            
+            // Generate debate when button is clicked
+            generateDebateBtn.addEventListener('click', function() {
+                // Show loading indicator
+                debateLoading.classList.remove('d-none');
+                debateTitle.textContent = '';
+                debateText.innerHTML = '';
+                
+                const type = debateType.value;
+                const numPerspectives = parseInt(perspectives.value);
+                
+                // Get current FEN and last move from the game state
+                const currentFen = game.fen();
+                
+                let endpoint = '';
+                let requestData = {};
+                
+                if (type === 'position') {
+                    endpoint = '/api/get_position_debate';
+                    requestData = {
+                        fen: currentFen,
+                        perspectives: numPerspectives
+                    };
+                    debateTitle.textContent = 'Debate on Current Position';
+                } else {
+                    endpoint = '/api/get_move_debate';
+                    requestData = {
+                        fen: lastPositionBeforeMove,
+                        move: lastHumanMove,
+                        perspectives: numPerspectives
+                    };
+                    debateTitle.textContent = 'Debate on Last Move';
+                }
+                
+                // Make API request for debate
+                fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide loading indicator
+                    debateLoading.classList.add('d-none');
+                    
+                    if (data.error) {
+                        debateText.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                        return;
+                    }
+                    
+                    // Format and display debate
+                    const debate = data.debate.debate;
+                    
+                    // Format the debate text with markdown
+                    const formattedDebate = debate
+                        .replace(/^([A-Za-z\s]+\(.*?\)):/gm, '<strong>$1:</strong>')
+                        .replace(/\n\n/g, '<br><br>')
+                        .replace(/\n/g, '<br>');
+                    
+                    debateText.innerHTML = formattedDebate;
+                    
+                    // Add perspective names at the top
+                    const perspectivesList = data.debate.perspectives.join(', ');
+                    const perspectivesInfo = document.createElement('p');
+                    perspectivesInfo.innerHTML = `<strong>Perspectives:</strong> ${perspectivesList}`;
+                    debateText.prepend(perspectivesInfo);
+                })
+                .catch(error => {
+                    debateLoading.classList.add('d-none');
+                    debateText.innerHTML = `<div class="alert alert-danger">Error generating debate: ${error}</div>`;
+                    console.error('Error generating debate:', error);
+                });
+            });
         });
     </script>
 </body>
