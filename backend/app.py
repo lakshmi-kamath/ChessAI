@@ -9,6 +9,7 @@ from analyzer import HumanMoveAnalysisAgent
 from debater import ChessDebateAgent
 from engine_manager import ChessEngineManager
 
+
 app = Flask(__name__)
 
 # Initialize the engine manager first (singleton)
@@ -27,21 +28,21 @@ retrieval_agent = ChessRetrievalAgent(
 selection_agent = ChessSelectionAgent(
     retrieval_agent=retrieval_agent,
     engine_manager=engine_manager,  # Pass engine manager instead of path
-    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",
+    gemini_api_key="your_api_key_here",
     stockfish_depth=14
 )
 
 # Initialize the human move analysis agent
 human_move_agent = HumanMoveAnalysisAgent(
     engine_manager=engine_manager,  # Pass engine manager instead of path
-    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",
+    gemini_api_key="your_api_key_here",
     stockfish_depth=14
 )
 
 # Initialize the debate agent with different chess styles
 debate_agent = ChessDebateAgent(
     engine_manager=engine_manager,  # Pass engine manager instead of path
-    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",
+    gemini_api_key="your_api_key_here",
     stockfish_depth=14,
     debate_styles=[
         "Classical",
@@ -66,7 +67,7 @@ def new_game():
         'board': chess.Board(),
         'history': [],
         'debates': [],  # Array to store debate history
-        'suggestion_requests': []  # Array to store suggestion requests
+        'suggestion_requests': [],  # Array to store suggestion requests
     }
     
     # Return reset_debate flag to clear debate section on frontend

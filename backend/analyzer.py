@@ -307,7 +307,7 @@ class HumanMoveAnalysisAgent:
             )
             
             # Get the response from Gemini
-            response = self.gemini.generate_content(prompt)
+            response = self.model.generate_content(prompt)  # Changed from self.gemini to self.model
             
             # Parse the response
             analysis_text = response.text
@@ -400,7 +400,7 @@ Format as valid JSON only.
 """
         
         try:
-            response = self.gemini.generate_content(prompt)
+            response = self.model.generate_content(prompt)  # Changed from self.gemini to self.model
             response_text = response.text
             
             # Extract JSON from the response
