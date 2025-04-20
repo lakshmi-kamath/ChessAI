@@ -1,25 +1,85 @@
-# analyzer.py
-import chess
-import chess.engine
-import logging
-from typing import Dict, Optional, List, Any, Union
-import google.generativeai as genai
-import json
+# Add this to your analyzer.py
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("HumanMoveAnalysisAgent")
+import os
+import json
+import hashlib
+import logging
+from typing import Optional, Dict,List, Any, Union
+import google.generativeai as genai
+import chess
+
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class CachedAnalysisManager:
+    def __init__(self, cache_file_path="analysis_cache.json"):
+        self.cache_file_path = cache_file_path
+        self._cache = self._load_cache()
+        
+    def _load_cache(self):
+        """Load the cache from disk or create a new one"""
+        if os.path.exists(self.cache_file_path):
+            try:
+                with open(self.cache_file_path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Error loading cache: {e}. Creating new cache.")
+                return {}
+        return {}
+    
+    def _save_cache(self):
+        """Save the cache to disk"""
+        try:
+            with open(self.cache_file_path, 'w') as f:
+                json.dump(self._cache, f)
+        except Exception as e:
+            logger.error(f"Error saving cache: {e}")
+    
+    def get_analysis(self, fen, move):
+        """Retrieve analysis if it exists in the cache"""
+        # Create a key based on FEN and move
+        cache_key = self._create_cache_key(fen, move)
+        return self._cache.get(cache_key)
+    
+    def store_analysis(self, fen, move, analysis_result):
+        """Store analysis result in the cache only if it doesn't already exist"""
+        cache_key = self._create_cache_key(fen, move)
+        
+        # Only store if this key doesn't already exist in the cache
+        if cache_key not in self._cache:
+            self._cache[cache_key] = analysis_result
+            self._save_cache()
+            logger.info(f"Stored new analysis for move {move} in position {fen[:20]}...")
+        else:
+            logger.info(f"Analysis for move {move} in position {fen[:20]}... already exists in cache")
+    
+    def _create_cache_key(self, fen, move):
+        """Create a unique key for the FEN and move combination"""
+        # We can use a hash to keep the keys short
+        combined = f"{fen}|{move}"
+        return hashlib.md5(combined.encode()).hexdigest()
+
+    def clear_cache(self):
+        """Method explicitly removed to prevent cache clearing"""
+        logger.warning("Cache clearing is disabled")
+        
+    def remove_entry(self, fen, move):
+        """Method explicitly removed to prevent entry deletion"""
+        logger.warning("Cache entry deletion is disabled")
 
 class HumanMoveAnalysisAgent:
     def __init__(
         self,
-        stockfish_path: str,
+        engine_manager,
         gemini_api_key: str,
         stockfish_depth: int = 14,
         temperature: float = 0.3,
         move_quality_thresholds: Optional[Dict[str, float]] = None,
-        gemini_model: str = "gemini-1.5-pro"
+        gemini_model: str = "gemini-1.5-pro",
+        cache_file_path: str = "analysis_cache.json"
     ):
-        self.stockfish_path = stockfish_path
+        self.engine_manager = engine_manager
         self.stockfish_depth = stockfish_depth
         self.temperature = temperature
         self.gemini_model = gemini_model
@@ -31,33 +91,20 @@ class HumanMoveAnalysisAgent:
             "Bad": 1.5,
             "Blunder": float('inf')
         }
+        
+        # Initialize cache manager
+        self.cache_manager = CachedAnalysisManager(cache_file_path)
 
-        # Initialize Gemini
-        logger.info(f"Initializing Gemini with model: {gemini_model}")
-        try:
-            genai.configure(api_key=gemini_api_key)
-            self.gemini = genai.GenerativeModel(
-                model_name=gemini_model,
-                generation_config={"temperature": temperature}
-            )
-            logger.info("Gemini API initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize Gemini API: {e}")
-            raise
-
-        # Initialize Stockfish
-        logger.info(f"Initializing Stockfish engine from {stockfish_path}")
-        try:
-            self.engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-            logger.info("Stockfish initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize Stockfish engine: {e}")
-            self.engine = None
-            raise
+        logger.info("Initializing Gemini LLM")
+        genai.configure(api_key=gemini_api_key)
+        self.model = genai.GenerativeModel(
+            model_name="gemini-1.5-pro",
+            generation_config={"temperature": temperature}
+        )
 
     def analyze_human_move(self, fen: str, move: str, move_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
-        Analyze a human move using Stockfish and Gemini.
+        Analyze a human move using Stockfish and Gemini, with caching.
         
         Args:
             fen: Position FEN string before the move was made
@@ -67,6 +114,12 @@ class HumanMoveAnalysisAgent:
         Returns:
             Dictionary containing the analysis results
         """
+        # First check if we have this analysis in cache
+        cached_analysis = self.cache_manager.get_analysis(fen, move)
+        if cached_analysis:
+            logger.info(f"Using cached analysis for move {move} in position {fen[:20]}...")
+            return cached_analysis
+        
         board = chess.Board(fen)
         
         try:
@@ -104,7 +157,7 @@ class HumanMoveAnalysisAgent:
             )
             
             # Build the complete analysis
-            return {
+            analysis_result = {
                 "move": move,
                 "move_san": move_san,
                 "stockfish_analysis": stockfish_analysis,
@@ -116,11 +169,18 @@ class HumanMoveAnalysisAgent:
                 "suggested_improvements": gemini_analysis.get("suggested_improvements", "")
             }
             
+            # Store the analysis in cache
+            self.cache_manager.store_analysis(fen, move, analysis_result)
+            
+            return analysis_result
+            
         except ValueError as e:
             return {"error": f"Invalid move format: {str(e)}"}
         except Exception as e:
             logger.error(f"Error analyzing move: {e}")
             return {"error": f"Analysis error: {str(e)}"}
+
+
 
     def _evaluate_with_stockfish(self, fen: str, move: Union[str, chess.Move]) -> Dict[str, Any]:
         """
@@ -136,8 +196,8 @@ class HumanMoveAnalysisAgent:
             # Set analysis parameters
             limit = chess.engine.Limit(depth=self.stockfish_depth)
             
-            # Get best move in current position
-            best_move_result = self.engine.analyse(board, limit, multipv=3)
+            # Get best move in current position using engine manager
+            best_move_result = self.engine_manager.analyze(board, limit, multipv=3)
             if isinstance(best_move_result, list):
                 best_move_result = best_move_result[0]  # Take first (best) variation
                 
@@ -152,7 +212,7 @@ class HumanMoveAnalysisAgent:
             
             # Get top alternative moves
             top_moves = []
-            multi_pv_result = self.engine.analyse(board, limit, multipv=3)
+            multi_pv_result = self.engine_manager.analyze(board, limit, multipv=3)
             if isinstance(multi_pv_result, list):
                 for idx, pvs in enumerate(multi_pv_result):
                     if "pv" in pvs and pvs["pv"]:
@@ -165,7 +225,7 @@ class HumanMoveAnalysisAgent:
             
             # Make the human move and evaluate the resulting position
             board.push(move_obj)
-            after_move_result = self.engine.analyse(board, limit)
+            after_move_result = self.engine_manager.analyze(board, limit)
             after_move_score = after_move_result.get("score", None)
             
             if not after_move_score:
@@ -201,13 +261,29 @@ class HumanMoveAnalysisAgent:
         return result
 
     def _convert_score_to_value(self, score):
-        """Convert a chess.engine.Score object to a numerical value"""
-        if score.is_mate():
-            return 9999 if score.mate() > 0 else -9999
-        return score.white().score() / 100.0
+        try:
+            perspective_score = score.white()  # Always use White's POV for consistency
+            if perspective_score.is_mate():
+                mate_value = perspective_score.mate()
+                return (10000 - abs(mate_value)) * (1 if mate_value > 0 else -1)
+            return perspective_score.score() / 100.0
+        except Exception as e:
+            logger.error(f"Error converting score to value: {e}, score type: {type(score)}")
+            try:
+                return 2.0 * (score.wdl().winning_chance() - 0.5) * 10.0
+            except:
+                return 0.0
 
     def _determine_move_quality(self, eval_diff: float) -> str:
         """Determine the quality of a move based on the evaluation difference"""
+        # Special handling for mate scores
+        if abs(eval_diff) > 9000:  # This is likely related to mate score differences
+            # Lost a mate or extended mate sequence significantly
+            return "Blunder"
+        elif abs(eval_diff) > 5000:  # Still in mate territory but significant difference
+            return "Bad"
+            
+        # Normal evaluation thresholds for non-mate positions
         for quality, threshold in sorted(self.move_quality_thresholds.items(), key=lambda x: x[1]):
             if eval_diff <= threshold:
                 return quality
@@ -384,12 +460,3 @@ Format as valid JSON only.
             if "move_san" in move_info:
                 formatted_history.append({"san": move_info["move_san"]})
         return formatted_history
-
-    def close(self):
-        """Clean up resources"""
-        if hasattr(self, 'engine') and self.engine:
-            try:
-                self.engine.quit()
-            except Exception as e:
-                logger.warning(f"Error while closing Stockfish engine: {e}")
-            self.engine = None

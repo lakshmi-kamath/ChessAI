@@ -5,10 +5,15 @@ import json
 import os
 from Retrieval import ChessRetrievalAgent
 from selector import ChessSelectionAgent
-from analyzer import HumanMoveAnalysisAgent  # Uncommented this import
-from debater import ChessDebateAgent  # Import the new debate agent
+from analyzer import HumanMoveAnalysisAgent
+from debater import ChessDebateAgent
+from engine_manager import ChessEngineManager
 
 app = Flask(__name__)
+
+# Initialize the engine manager first (singleton)
+stockfish_path = "/opt/homebrew/bin/stockfish"  # Path to Stockfish engine
+engine_manager = ChessEngineManager(stockfish_path)  # Ensure engine path is passed during initialization
 
 # Initialize agents (adjust paths as needed)
 retrieval_agent = ChessRetrievalAgent(
@@ -21,33 +26,31 @@ retrieval_agent = ChessRetrievalAgent(
 
 selection_agent = ChessSelectionAgent(
     retrieval_agent=retrieval_agent,
-    stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
-    gemini_api_key="AIzaSyA-O5_IztomM1BLdcenmjaEKbjby6GwnPI",  # Replace with your actual API key
+    engine_manager=engine_manager,  # Pass engine manager instead of path
+    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",
     stockfish_depth=14
 )
 
 # Initialize the human move analysis agent
 human_move_agent = HumanMoveAnalysisAgent(
-    stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
-    gemini_api_key="AIzaSyA-O5_IztomM1BLdcenmjaEKbjby6GwnPI",  # Replace with your actual API key
+    engine_manager=engine_manager,  # Pass engine manager instead of path
+    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",
     stockfish_depth=14
 )
 
 # Initialize the debate agent with different chess styles
 debate_agent = ChessDebateAgent(
-    stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
-    gemini_api_key="AIzaSyA-O5_IztomM1BLdcenmjaEKbjby6GwnPI",  # Replace with your actual API key
+    engine_manager=engine_manager,  # Pass engine manager instead of path
+    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",
     stockfish_depth=14,
-    temperature=0.7,
     debate_styles=[
-        "Classical Positional",
-        "Tactical Attacker",
-        "Modern Dynamic",
+        "Classical",
+        "Tactical",
         "Hypermodern",
-        "Endgame Specialist",
-        "Romantic Style"
+        "Positional"
     ]
 )
+
 
 # Game state (simple in-memory storage)
 active_games = {}
@@ -62,7 +65,8 @@ def new_game():
     active_games[game_id] = {
         'board': chess.Board(),
         'history': [],
-        'debates': []  # Add a debates array to store debate history
+        'debates': [],  # Array to store debate history
+        'suggestion_requests': []  # Array to store suggestion requests
     }
     
     # Return reset_debate flag to clear debate section on frontend
@@ -104,11 +108,14 @@ def make_move():
         board.push(move_obj)
         
         # Record move in history with analysis
+        move_number = len(game['history']) // 2 + 1
         game['history'].append({
             'move': move,
             'move_san': move_san,  # We calculated this before pushing the move
             'fen': current_fen,
-            'analysis': human_move_analysis  # Store the analysis in the history
+            'analysis': human_move_analysis,  # Store the analysis in the history
+            'move_number': move_number,
+            'player': 'white' if len(game['history']) % 2 == 0 else 'black'
         })
         
         # Make bot move if the game is not over
@@ -166,6 +173,7 @@ def make_move():
 def get_suggestion():
     data = request.json
     fen = data.get('fen')
+    game_id = data.get('game_id')  # Added game_id parameter
     
     if not fen:
         return jsonify({'error': 'FEN position required'}), 400
@@ -176,6 +184,16 @@ def get_suggestion():
         
         # Get suggestion - this is now only done when explicitly requested
         suggestion = selection_agent.suggest_move(fen)
+        
+        # Record suggestion request if game_id is provided
+        if game_id and game_id in active_games:
+            move_number = len(active_games[game_id]['history']) // 2 + 1
+            active_games[game_id]['suggestion_requests'].append({
+                'move_number': move_number,
+                'fen': fen,
+                'suggested_moves': suggestion.get('top_moves', []),
+                'followed': False  # Will be updated if player follows this suggestion
+            })
         
         return jsonify({
             'suggestion': {
@@ -224,7 +242,7 @@ def analyze_move():
     except ValueError:
         return jsonify({'error': 'Invalid FEN position or move'}), 400
 
-# New routes for the debate functionality
+# Routes for the debate functionality
 
 @app.route('/api/get_position_debate', methods=['POST'])
 def get_position_debate():
@@ -307,7 +325,7 @@ def get_move_debate():
     except Exception as e:
         return jsonify({'error': f'Error generating move debate: {str(e)}'}), 500
 
-# New route to get available debate styles
+# Route to get available debate styles
 @app.route('/api/get_debate_styles', methods=['GET'])
 def get_debate_styles():
     """Endpoint for retrieving available debate styles"""
@@ -315,5 +333,14 @@ def get_debate_styles():
         'styles': debate_agent.debate_styles
     })
 
+@app.teardown_appcontext
+def cleanup(exception=None):
+    """Close resources when the application shuts down."""
+    engine_manager.close()
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    try:
+        app.run(debug=True)
+    finally:
+        # Ensure engine is closed even if app crashes
+        engine_manager.close()

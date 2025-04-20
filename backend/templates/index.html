@@ -133,7 +133,7 @@
             </div>
         </div>
     </div>
-
+    
     <!-- Required JavaScript libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
@@ -305,10 +305,6 @@
             $('#suggestionContainer').hide();
             $('#topMovesContainer').hide();
             
-            // Clear debate section
-            $('.debate-title').text('');
-            $('.debate-text').empty();
-            
             // Create new game on server
             fetch('/api/new_game', {
                 method: 'POST',
@@ -328,7 +324,6 @@
             })
             .catch(error => handleServerError(error, 'starting a new game'));
         }
-
         // Get suggestion for current position
         function getSuggestion() {
             if (!gameId) {
@@ -461,23 +456,29 @@
                 $('#humanMoveAnalysis').html('<p class="text-muted">No analysis available for your move.</p>');
             }
         }
-        
+        let isGameOver = false;
         // Check game status and display appropriate message
         function checkGameStatus(status) {
             if (!status) return;
-            
+
             if (status.is_game_over) {
-                let message = 'Game over! ';
+                isGameOver = true;
+                let message = 'Game over!';
+
                 if (status.is_checkmate) {
-                    message += status.result === '1-0' ? 'You win by checkmate!' : 'Bot wins by checkmate!';
+                    message = status.result === '1-0' 
+                        ? 'You won by checkmate! 🏆' 
+                        : 'Bot wins by checkmate. Try again! 🤖';
                 } else if (status.is_stalemate) {
-                    message += 'Draw by stalemate.';
+                    message = 'Draw by stalemate.';
                 } else {
-                    message += `Result: ${status.result}`;
+                    message = `Game result: ${status.result}`;
                 }
-                
+
                 setTimeout(() => {
-                    showAlert(message, status.result === '1-0' ? 'success' : 'info');
+                    $('#gameOverMessage').html(message);
+                    const gameOverModal = new bootstrap.Modal(document.getElementById('gameOverModal'));
+                    gameOverModal.show();
                 }, 500);
             } else if (status.is_check) {
                 const inCheck = game.turn() === 'w' ? 'You are' : 'Bot is';
@@ -603,18 +604,40 @@
             });
         }
         
-        // Initialize when the page loads
+        // Document ready
         $(document).ready(function() {
+            // Initialize chessboard
             initBoard();
-            startNewGame();
             
-            // Set up button handlers
+            // Set up event listeners
             $('#newGameBtn').on('click', startNewGame);
             $('#getSuggestionBtn').on('click', getSuggestion);
             $('#undoBtn').on('click', undoMove);
             $('#flipBtn').on('click', flipBoard);
             $('#generateDebate').on('click', generateDebate);
+            
+            // Start new game on page load
+            startNewGame();
         });
     </script>
+    <!-- Game Over Modal -->
+<div class="modal fade" id="gameOverModal" tabindex="-1" aria-labelledby="gameOverLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content text-center">
+        <div class="modal-header bg-dark text-white">
+          <h5 class="modal-title" id="gameOverLabel"><i class="fas fa-flag-checkered"></i> Game Over</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <h4 id="gameOverMessage"></h4>
+        </div>
+        <div class="modal-footer justify-content-center">
+          <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-success" onclick="startNewGame()">Play Again</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
 </body>
 </html>

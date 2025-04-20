@@ -441,9 +441,6 @@ class ChessRetrievalAgent:
         """Identify potential tactical themes in the position"""
         themes = []
         
-        # Check for pins, forks, etc.
-        # This is a simplified version - a real implementation would be more complex
-        
         # Check for check
         if board.is_check():
             themes.append("check")
@@ -454,6 +451,3 @@ class ChessRetrievalAgent:
             themes.append("potential tactics")
             
         return themes if themes else ["no obvious tactical themes"]
-
-    
-    
