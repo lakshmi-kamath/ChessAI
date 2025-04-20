@@ -620,24 +620,24 @@
             startNewGame();
         });
     </script>
+
     <!-- Game Over Modal -->
-<div class="modal fade" id="gameOverModal" tabindex="-1" aria-labelledby="gameOverLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content text-center">
-        <div class="modal-header bg-dark text-white">
-          <h5 class="modal-title" id="gameOverLabel"><i class="fas fa-flag-checkered"></i> Game Over</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <div class="modal fade" id="gameOverModal" tabindex="-1" aria-labelledby="gameOverLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-center">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title" id="gameOverLabel"><i class="fas fa-flag-checkered"></i> Game Over</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <h4 id="gameOverMessage"></h4>
+                </div>
+                <div class="modal-footer d-flex justify-content-between">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-success" onclick="startNewGame()">Play Again</button>
+                </div>
+            </div>
         </div>
-        <div class="modal-body">
-          <h4 id="gameOverMessage"></h4>
-        </div>
-        <div class="modal-footer justify-content-center">
-          <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
-          <button type="button" class="btn btn-success" onclick="startNewGame()">Play Again</button>
-        </div>
-      </div>
     </div>
-  </div>
-  
 </body>
 </html>
