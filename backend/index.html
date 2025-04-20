@@ -130,6 +130,68 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Feedback Button -->
+                <div class="d-flex justify-content-center mt-3 mb-4">
+                    <button id="openFeedbackBtn" class="chess-btn btn-feedback">
+                        <i class="fas fa-comment-dots"></i> Get Game Feedback
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Feedback Modal -->
+    <div id="feedbackModal" class="feedback-modal">
+        <div class="feedback-modal-content">
+            <div class="feedback-modal-header">
+                <h3><i class="fas fa-comment-dots"></i> Chess Coach Feedback</h3>
+                <button id="closeFeedbackBtn" class="close-btn"><i class="fas fa-times"></i></button>
+            </div>
+            
+            <div class="feedback-modal-body">
+                <!-- Feedback Options Panel -->
+                <div class="feedback-options-panel">
+                    <div class="form-group mb-3">
+                        <label for="feedbackTone" class="form-label">Feedback Tone:</label>
+                        <select class="form-select" id="feedbackTone">
+                            <option value="Encouraging">Encouraging</option>
+                            <option value="Critical">Critical</option>
+                            <option value="Analytical">Analytical</option>
+                            <option value="Instructive">Instructive</option>
+                            <option value="Casual">Casual</option>
+                        </select>
+                    </div>
+                    
+                    <button id="generateFeedbackBtn" class="chess-btn btn-primary w-100 mb-3">
+                        <i class="fas fa-sync-alt"></i> Generate Feedback
+                    </button>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="forceFeedbackCheck">
+                        <label class="form-check-label" for="forceFeedbackCheck">
+                            Generate feedback for ongoing game
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Feedback Chat Panel -->
+                <div class="feedback-chat-panel">
+                    <div class="feedback-messages" id="feedbackMessages">
+                        <div class="welcome-message">
+                            <h4>Welcome to Chess Coach Feedback</h4>
+                            <p>Generate feedback to review your game performance, learn from your mistakes, and get personalized advice to improve your chess skills.</p>
+                            <p class="text-muted">Click "Generate Feedback" to start.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="feedback-input-container">
+                        <input type="text" id="feedbackQuestion" class="feedback-input" placeholder="Ask a follow-up question...">
+                        <button id="sendQuestionBtn" class="send-btn">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -305,9 +367,21 @@
             $('#suggestionContainer').hide();
             $('#topMovesContainer').hide();
             
+            // Hide feedback button when starting a new game
+            hideFeedbackButton();
+            
             // Clear debate section
             $('.debate-title').text('');
             $('.debate-text').empty();
+            
+            // Clear feedback messages
+            $('#feedbackMessages').html(`
+                <div class="welcome-message">
+                    <h4>Welcome to Chess Coach Feedback</h4>
+                    <p>Generate feedback to review your game performance, learn from your mistakes, and get personalized advice to improve your chess skills.</p>
+                    <p class="text-muted">Click "Generate Feedback" to start.</p>
+                </div>
+            `);
             
             // Create new game on server
             fetch('/api/new_game', {
@@ -328,7 +402,6 @@
             })
             .catch(error => handleServerError(error, 'starting a new game'));
         }
-
         // Get suggestion for current position
         function getSuggestion() {
             if (!gameId) {
@@ -461,23 +534,30 @@
                 $('#humanMoveAnalysis').html('<p class="text-muted">No analysis available for your move.</p>');
             }
         }
-        
+        let isGameOver = false;
         // Check game status and display appropriate message
         function checkGameStatus(status) {
             if (!status) return;
-            
+
             if (status.is_game_over) {
-                let message = 'Game over! ';
+                isGameOver = true;
+                let message = 'Game over!';
+
                 if (status.is_checkmate) {
-                    message += status.result === '1-0' ? 'You win by checkmate!' : 'Bot wins by checkmate!';
+                    message = status.result === '1-0' 
+                        ? 'You won by checkmate! 🏆' 
+                        : 'Bot wins by checkmate. Try again! 🤖';
                 } else if (status.is_stalemate) {
-                    message += 'Draw by stalemate.';
+                    message = 'Draw by stalemate.';
                 } else {
-                    message += `Result: ${status.result}`;
+                    message = `Game result: ${status.result}`;
                 }
-                
+
                 setTimeout(() => {
-                    showAlert(message, status.result === '1-0' ? 'success' : 'info');
+                    $('#gameOverMessage').html(message);
+                    const gameOverModal = new bootstrap.Modal(document.getElementById('gameOverModal'));
+                    gameOverModal.show();
+                    $('#openFeedbackBtn').show();  // Show feedback option
                 }, 500);
             } else if (status.is_check) {
                 const inCheck = game.turn() === 'w' ? 'You are' : 'Bot is';
@@ -486,6 +566,13 @@
                 }, 500);
             }
         }
+
+
+// Add a function to hide the feedback button
+function hideFeedbackButton() {
+    isGameOver = false;
+    $('#openFeedbackBtn').hide();
+}
         
         // Handle undo move
         function undoMove() {
@@ -603,18 +690,363 @@
             });
         }
         
-        // Initialize when the page loads
-        $(document).ready(function() {
-            initBoard();
-            startNewGame();
+        // FEEDBACK MODAL FUNCTIONALITY
+        
+        // Open the feedback modal
+        function openFeedbackModal() {
+            document.getElementById('feedbackModal').style.display = 'flex';
+            document.body.classList.add('modal-open');
             
-            // Set up button handlers
+            // Update the label based on game state
+            if (isGameOver) {
+                $('#forceFeedbackCheck').parent().find('label').text('Include additional insights');
+            } else {
+                $('#forceFeedbackCheck').parent().find('label').text('Generate feedback for ongoing game');
+                
+                // If game is not over, show a notice
+                if (!$('#forceFeedbackCheck').is(':checked')) {
+                    showFeedbackAlert('Note: For best results, get feedback after the game is complete', 'info');
+                }
+            }
+        }
+        
+        // Close the feedback modal
+        function closeFeedbackModal() {
+            document.getElementById('feedbackModal').style.display = 'none';
+            document.body.classList.remove('modal-open');
+        }
+        
+        // Generate feedback
+        function generateFeedback() {
+            if (!gameId) {
+                showFeedbackAlert('Please start a new game first', 'warning');
+                return;
+            }
+            
+            // Show loading message
+            $('#feedbackMessages').html(`
+                <div class="feedback-loading">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Generating comprehensive feedback...</p>
+                </div>
+            `);
+            
+            const feedbackTone = document.getElementById('feedbackTone').value;
+            const forceFeedback = document.getElementById('forceFeedbackCheck').checked;
+            
+            // Update the feedback checkbox label based on game state
+            if (isGameOver) {
+                $('#forceFeedbackCheck').parent().find('label').text('Include additional insights');
+            } else {
+                $('#forceFeedbackCheck').parent().find('label').text('Generate feedback for ongoing game');
+            }
+            
+            fetch('/api/generate_feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    game_id: gameId,
+                    tone: feedbackTone,
+                    force: forceFeedback
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showFeedbackAlert(data.error, 'danger');
+                    return;
+                }
+                
+                // Display feedback
+                displayFeedbackMessage(data.feedback.content, 'coach');
+                
+                // Enable the input for follow-up questions
+                document.getElementById('feedbackQuestion').disabled = false;
+                document.getElementById('sendQuestionBtn').disabled = false;
+            })
+            .catch(error => {
+                handleServerError(error, 'generating feedback');
+                $('#feedbackMessages').html(`
+                    <div class="feedback-error">
+                        <p><i class="fas fa-exclamation-circle"></i> Error generating feedback. Please try again.</p>
+                    </div>
+                `);
+            });
+        }
+
+        // Document ready - add code to hide the feedback button initially
+        $(document).ready(function() {
+            // Initialize chessboard
+            initBoard();
+            
+            // Hide feedback button initially
+            hideFeedbackButton();
+            
+            // Set up event listeners
             $('#newGameBtn').on('click', startNewGame);
             $('#getSuggestionBtn').on('click', getSuggestion);
             $('#undoBtn').on('click', undoMove);
             $('#flipBtn').on('click', flipBoard);
             $('#generateDebate').on('click', generateDebate);
+            
+            // Feedback modal event listeners
+            $('#openFeedbackBtn').on('click', openFeedbackModal);
+            $('#closeFeedbackBtn').on('click', closeFeedbackModal);
+            $('#generateFeedbackBtn').on('click', generateFeedback);
+            $('#feedbackTone').on('change', changeFeedbackTone);
+            
+            // Send question when Enter key is pressed
+            $('#feedbackQuestion').keypress(function(e) {
+                if (e.which === 13) {
+                    sendFeedbackQuestion();
+                    return false;
+                }
+            });
+            
+            // Send question button click
+            $('#sendQuestionBtn').on('click', sendFeedbackQuestion);
+            
+            // Start new game on page load
+            startNewGame();
+        });
+
+        // Send follow-up question
+        function sendFeedbackQuestion() {
+            const question = document.getElementById('feedbackQuestion').value.trim();
+            
+            if (!question) return;
+            
+            // Display user question
+            displayFeedbackMessage(question, 'user');
+            
+            // Clear input
+            document.getElementById('feedbackQuestion').value = '';
+            
+            // Show typing indicator
+            $('#feedbackMessages').append(`
+                <div class="feedback-typing">
+                    <div class="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+            `);
+            
+            // Scroll to bottom
+            const messages = document.getElementById('feedbackMessages');
+            messages.scrollTop = messages.scrollHeight;
+            
+            fetch('/api/feedback_question', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    question: question
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Remove typing indicator
+                $('.feedback-typing').remove();
+                
+                if (data.error) {
+                    showFeedbackAlert(data.error, 'danger');
+                    return;
+                }
+                
+                // Display coach response
+                displayFeedbackMessage(data.answer, 'coach');
+            })
+            .catch(error => {
+                // Remove typing indicator
+                $('.feedback-typing').remove();
+                
+                handleServerError(error, 'sending feedback question');
+                displayFeedbackMessage('Sorry, I encountered an error processing your question. Please try again.', 'coach error');
+            });
+        }
+        // Display feedback message
+        function displayFeedbackMessage(message, sender) {
+            const messagesContainer = document.getElementById('feedbackMessages');
+            
+            // Create message element
+            const messageElement = document.createElement('div');
+            messageElement.className = `feedback-message ${sender}`;
+            
+            // Add different styling based on sender
+            if (sender === 'coach') {
+                messageElement.innerHTML = `
+                    <div class="message-avatar">
+                        <i class="fas fa-user-tie"></i>
+                    </div>
+                    <div class="message-content">
+                        <div class="message-sender">Chess Coach</div>
+                        <div class="message-text">${message}</div>
+                    </div>
+                `;
+            } else if (sender === 'user') {
+                messageElement.innerHTML = `
+                    <div class="message-content user-message">
+                        <div class="message-text">${message}</div>
+                    </div>
+                    <div class="message-avatar user-avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                `;
+            } else if (sender === 'coach error') {
+                messageElement.innerHTML = `
+                    <div class="message-avatar">
+                        <i class="fas fa-user-tie"></i>
+                    </div>
+                    <div class="message-content">
+                        <div class="message-sender">Chess Coach</div>
+                        <div class="message-text error">${message}</div>
+                    </div>
+                `;
+            }
+            
+            // Append message to container
+            messagesContainer.appendChild(messageElement);
+            
+            // Scroll to bottom
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        // Show feedback alert
+        function showFeedbackAlert(message, type = 'info') {
+            const alertElement = document.createElement('div');
+            alertElement.className = `feedback-alert ${type}`;
+            alertElement.innerHTML = `
+                <i class="fas fa-${type === 'danger' ? 'exclamation-circle' : 
+                                  type === 'warning' ? 'exclamation-triangle' : 
+                                  type === 'success' ? 'check-circle' : 'info-circle'}"></i>
+                <span>${message}</span>
+            `;
+            
+            $('#feedbackMessages').append(alertElement);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                alertElement.remove();
+            }, 5000);
+            
+            // Scroll to bottom
+            const messages = document.getElementById('feedbackMessages');
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        // Change feedback tone
+        function changeFeedbackTone() {
+            if (!gameId) {
+                showFeedbackAlert('Please start a new game first', 'warning');
+                return;
+            }
+            
+            const newTone = document.getElementById('feedbackTone').value;
+            
+            // Show loading message
+            $('#feedbackMessages').append(`
+                <div class="feedback-loading">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Regenerating feedback with ${newTone} tone...</p>
+                </div>
+            `);
+            
+            // Scroll to bottom
+            const messages = document.getElementById('feedbackMessages');
+            messages.scrollTop = messages.scrollHeight;
+            
+            fetch('/api/change_feedback_tone', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    game_id: gameId,
+                    tone: newTone
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Remove loading message
+                $('.feedback-loading').last().remove();
+                
+                if (data.error) {
+                    showFeedbackAlert(data.error, 'danger');
+                    return;
+                }
+                
+                // Display feedback with new tone
+                displayFeedbackMessage(`[${newTone} Tone] ${data.feedback.content}`, 'coach');
+            })
+            .catch(error => {
+                // Remove loading message
+                $('.feedback-loading').last().remove();
+                
+                handleServerError(error, 'changing feedback tone');
+                showFeedbackAlert('Error changing feedback tone', 'danger');
+            });
+        }
+        
+        // Document ready
+        $(document).ready(function() {
+            // Initialize chessboard
+            initBoard();
+            
+            // Set up event listeners
+            $('#newGameBtn').on('click', startNewGame);
+            $('#getSuggestionBtn').on('click', getSuggestion);
+            $('#undoBtn').on('click', undoMove);
+            $('#flipBtn').on('click', flipBoard);
+            $('#generateDebate').on('click', generateDebate);
+            
+            // Feedback modal event listeners
+            $('#openFeedbackBtn').on('click', openFeedbackModal);
+            $('#closeFeedbackBtn').on('click', closeFeedbackModal);
+            $('#generateFeedbackBtn').on('click', generateFeedback);
+            $('#feedbackTone').on('change', changeFeedbackTone);
+            
+            // Send question when Enter key is pressed
+            $('#feedbackQuestion').keypress(function(e) {
+                if (e.which === 13) {
+                    sendFeedbackQuestion();
+                    return false;
+                }
+            });
+            
+            // Send question button click
+            $('#sendQuestionBtn').on('click', sendFeedbackQuestion);
+            
+            // Start new game on page load
+            startNewGame();
         });
     </script>
+    <!-- Game Over Modal -->
+<div class="modal fade" id="gameOverModal" tabindex="-1" aria-labelledby="gameOverLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content text-center">
+        <div class="modal-header bg-dark text-white">
+          <h5 class="modal-title" id="gameOverLabel"><i class="fas fa-flag-checkered"></i> Game Over</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <h4 id="gameOverMessage"></h4>
+        </div>
+        <div class="modal-footer justify-content-center">
+          <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-success" onclick="startNewGame()">Play Again</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
 </body>
 </html>

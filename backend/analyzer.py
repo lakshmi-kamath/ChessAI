@@ -201,13 +201,29 @@ class HumanMoveAnalysisAgent:
         return result
 
     def _convert_score_to_value(self, score):
-        """Convert a chess.engine.Score object to a numerical value"""
-        if score.is_mate():
-            return 9999 if score.mate() > 0 else -9999
-        return score.white().score() / 100.0
+        try:
+            perspective_score = score.white()  # Always use White's POV for consistency
+            if perspective_score.is_mate():
+                mate_value = perspective_score.mate()
+                return (10000 - abs(mate_value)) * (1 if mate_value > 0 else -1)
+            return perspective_score.score() / 100.0
+        except Exception as e:
+            logger.error(f"Error converting score to value: {e}, score type: {type(score)}")
+            try:
+                return 2.0 * (score.wdl().winning_chance() - 0.5) * 10.0
+            except:
+                return 0.0
 
     def _determine_move_quality(self, eval_diff: float) -> str:
         """Determine the quality of a move based on the evaluation difference"""
+        # Special handling for mate scores
+        if abs(eval_diff) > 9000:  # This is likely related to mate score differences
+            # Lost a mate or extended mate sequence significantly
+            return "Blunder"
+        elif abs(eval_diff) > 5000:  # Still in mate territory but significant difference
+            return "Bad"
+            
+        # Normal evaluation thresholds for non-mate positions
         for quality, threshold in sorted(self.move_quality_thresholds.items(), key=lambda x: x[1]):
             if eval_diff <= threshold:
                 return quality

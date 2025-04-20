@@ -5,8 +5,9 @@ import json
 import os
 from Retrieval import ChessRetrievalAgent
 from selector import ChessSelectionAgent
-from analyzer import HumanMoveAnalysisAgent  # Uncommented this import
-from debater import ChessDebateAgent  # Import the new debate agent
+from analyzer import HumanMoveAnalysisAgent
+from debater import ChessDebateAgent
+from feedback import ChessFeedbackAgent  # Import the new feedback agent
 
 app = Flask(__name__)
 
@@ -22,21 +23,21 @@ retrieval_agent = ChessRetrievalAgent(
 selection_agent = ChessSelectionAgent(
     retrieval_agent=retrieval_agent,
     stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
-    gemini_api_key="AIzaSyA-O5_IztomM1BLdcenmjaEKbjby6GwnPI",  # Replace with your actual API key
+    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",  # Replace with your actual API key
     stockfish_depth=14
 )
 
 # Initialize the human move analysis agent
 human_move_agent = HumanMoveAnalysisAgent(
     stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
-    gemini_api_key="AIzaSyA-O5_IztomM1BLdcenmjaEKbjby6GwnPI",  # Replace with your actual API key
+    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",  # Replace with your actual API key
     stockfish_depth=14
 )
 
 # Initialize the debate agent with different chess styles
 debate_agent = ChessDebateAgent(
     stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
-    gemini_api_key="AIzaSyA-O5_IztomM1BLdcenmjaEKbjby6GwnPI",  # Replace with your actual API key
+    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",  # Replace with your actual API key
     stockfish_depth=14,
     temperature=0.7,
     debate_styles=[
@@ -46,6 +47,21 @@ debate_agent = ChessDebateAgent(
         "Hypermodern",
         "Endgame Specialist",
         "Romantic Style"
+    ]
+)
+
+# Initialize the feedback agent
+feedback_agent = ChessFeedbackAgent(
+    stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
+    gemini_api_key="AIzaSyBZhEyYLeNGqCrxCLIAOxUeXBdCYW5Kly4",  # Replace with your actual API key
+    stockfish_depth=14,
+    temperature=0.2,
+    feedback_tones=[
+        "Encouraging",
+        "Critical",
+        "Analytical",
+        "Instructive",
+        "Casual"
     ]
 )
 
@@ -62,7 +78,8 @@ def new_game():
     active_games[game_id] = {
         'board': chess.Board(),
         'history': [],
-        'debates': []  # Add a debates array to store debate history
+        'debates': [],  # Array to store debate history
+        'suggestion_requests': []  # Array to store suggestion requests
     }
     
     # Return reset_debate flag to clear debate section on frontend
@@ -104,11 +121,14 @@ def make_move():
         board.push(move_obj)
         
         # Record move in history with analysis
+        move_number = len(game['history']) // 2 + 1
         game['history'].append({
             'move': move,
             'move_san': move_san,  # We calculated this before pushing the move
             'fen': current_fen,
-            'analysis': human_move_analysis  # Store the analysis in the history
+            'analysis': human_move_analysis,  # Store the analysis in the history
+            'move_number': move_number,
+            'player': 'white' if len(game['history']) % 2 == 0 else 'black'
         })
         
         # Make bot move if the game is not over
@@ -166,6 +186,7 @@ def make_move():
 def get_suggestion():
     data = request.json
     fen = data.get('fen')
+    game_id = data.get('game_id')  # Added game_id parameter
     
     if not fen:
         return jsonify({'error': 'FEN position required'}), 400
@@ -176,6 +197,16 @@ def get_suggestion():
         
         # Get suggestion - this is now only done when explicitly requested
         suggestion = selection_agent.suggest_move(fen)
+        
+        # Record suggestion request if game_id is provided
+        if game_id and game_id in active_games:
+            move_number = len(active_games[game_id]['history']) // 2 + 1
+            active_games[game_id]['suggestion_requests'].append({
+                'move_number': move_number,
+                'fen': fen,
+                'suggested_moves': suggestion.get('top_moves', []),
+                'followed': False  # Will be updated if player follows this suggestion
+            })
         
         return jsonify({
             'suggestion': {
@@ -224,7 +255,7 @@ def analyze_move():
     except ValueError:
         return jsonify({'error': 'Invalid FEN position or move'}), 400
 
-# New routes for the debate functionality
+# Routes for the debate functionality
 
 @app.route('/api/get_position_debate', methods=['POST'])
 def get_position_debate():
@@ -307,13 +338,169 @@ def get_move_debate():
     except Exception as e:
         return jsonify({'error': f'Error generating move debate: {str(e)}'}), 500
 
-# New route to get available debate styles
+# Route to get available debate styles
 @app.route('/api/get_debate_styles', methods=['GET'])
 def get_debate_styles():
     """Endpoint for retrieving available debate styles"""
     return jsonify({
         'styles': debate_agent.debate_styles
     })
+
+# NEW ROUTES FOR FEEDBACK FUNCTIONALITY
+
+@app.route('/api/generate_feedback', methods=['POST'])
+def generate_feedback():
+    """Endpoint for generating comprehensive feedback on a completed game"""
+    data = request.json
+    game_id = data.get('game_id')
+    feedback_tone = data.get('tone')  # Optional tone parameter
+    
+    if not game_id or game_id not in active_games:
+        return jsonify({'error': 'Invalid game ID'}), 400
+    
+    game = active_games[game_id]
+    
+    # Check if the game is over or force feedback generation
+    force_feedback = data.get('force', False)
+    if not game['board'].is_game_over() and not force_feedback:
+        return jsonify({'error': 'Game is not yet complete. Set force=true to generate feedback anyway.'}), 400
+    
+    try:
+        # Get game result
+        result = game['board'].result() if game['board'].is_game_over() else 'ongoing'
+        
+        # Generate feedback using the feedback agent
+        feedback_response = feedback_agent.generate_feedback(
+            move_history=game['history'],
+            game_result=result,
+            suggestion_requests=game.get('suggestion_requests', []),
+            feedback_tone=feedback_tone
+        )
+        
+        if "error" in feedback_response:
+            return jsonify({'error': feedback_response["error"]}), 500
+            
+        return jsonify({
+            'feedback': feedback_response
+        })
+    except Exception as e:
+        return jsonify({'error': f'Error generating feedback: {str(e)}'}), 500
+
+@app.route('/api/feedback_question', methods=['POST'])
+def feedback_question():
+    """Endpoint for answering a follow-up question about the feedback"""
+    data = request.json
+    question = data.get('question')
+    
+    if not question:
+        return jsonify({'error': 'Question is required'}), 400
+    
+    try:
+        # Use the feedback agent to answer the question
+        answer_response = feedback_agent.answer_question(question)
+        
+        if "error" in answer_response:
+            return jsonify({'error': answer_response["error"]}), 500
+            
+        return jsonify({
+            'answer': answer_response
+        })
+    except Exception as e:
+        return jsonify({'error': f'Error answering question: {str(e)}'}), 500
+
+@app.route('/api/change_feedback_tone', methods=['POST'])
+def change_feedback_tone():
+    """Endpoint for changing the tone of the feedback"""
+    data = request.json
+    game_id = data.get('game_id')
+    new_tone = data.get('tone')
+    
+    if not game_id or game_id not in active_games:
+        return jsonify({'error': 'Invalid game ID'}), 400
+        
+    if not new_tone:
+        return jsonify({'error': 'New tone is required'}), 400
+    
+    game = active_games[game_id]
+    
+    try:
+        # Get game result
+        result = game['board'].result() if game['board'].is_game_over() else 'ongoing'
+        
+        # Generate feedback with the new tone
+        feedback_response = feedback_agent.change_feedback_tone(
+            move_history=game['history'],
+            game_result=result,
+            suggestion_requests=game.get('suggestion_requests', []),
+            new_tone=new_tone
+        )
+        
+        if "error" in feedback_response:
+            return jsonify({'error': feedback_response["error"]}), 500
+            
+        return jsonify({
+            'feedback': feedback_response
+        })
+    except Exception as e:
+        return jsonify({'error': f'Error changing feedback tone: {str(e)}'}), 500
+
+@app.route('/api/get_feedback_tones', methods=['GET'])
+def get_feedback_tones():
+    """Endpoint for retrieving available feedback tones"""
+    return jsonify({
+        'tones': feedback_agent.get_available_tones()
+    })
+
+@app.route('/api/invoke_debate_from_feedback', methods=['POST'])
+def invoke_debate_from_feedback():
+    """Endpoint for invoking a debate from the feedback interface"""
+    data = request.json
+    game_id = data.get('game_id')
+    fen = data.get('fen')
+    move = data.get('move')  # Optional, if debating a specific move
+    num_perspectives = data.get('perspectives', 2)
+    
+    if not game_id or game_id not in active_games:
+        return jsonify({'error': 'Invalid game ID'}), 400
+        
+    if not fen:
+        return jsonify({'error': 'FEN position required'}), 400
+    
+    try:
+        if move:
+            # Debate about a specific move
+            debate_result = feedback_agent.invoke_debate(
+                debate_agent=debate_agent,
+                move_or_position=move,
+                is_move=True,
+                fen=fen,
+                num_perspectives=num_perspectives
+            )
+        else:
+            # Debate about a position
+            debate_result = feedback_agent.invoke_debate(
+                debate_agent=debate_agent,
+                move_or_position=fen,
+                is_move=False,
+                num_perspectives=num_perspectives
+            )
+        
+        if "error" in debate_result:
+            return jsonify({'error': debate_result["error"]}), 500
+            
+        # Store debate in game history
+        active_games[game_id]['debates'].append({
+            'type': 'move' if move else 'position',
+            'fen': fen,
+            'move': move if move else None,
+            'result': debate_result
+        })
+        
+        return jsonify({
+            'debate': debate_result
+        })
+    except Exception as e:
+        return jsonify({'error': f'Error invoking debate: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

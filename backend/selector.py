@@ -121,17 +121,9 @@ class ChessSelectionAgent:
     def evaluate_with_stockfish(self, fen: str, move: Union[str, chess.Move], time_limit: Optional[float] = None) -> Dict:
         """
         Evaluate a move with Stockfish.
-        
-        Args:
-            fen: FEN notation of the position
-            move: Move in UCI format or chess.Move object
-            time_limit: Time limit for analysis in seconds (optional)
-            
-        Returns:
-            Evaluation results
         """
         board = chess.Board(fen)
-        
+
         # Convert string move to chess.Move if needed
         if isinstance(move, str):
             try:
@@ -141,53 +133,50 @@ class ChessSelectionAgent:
                 return {"error": f"Invalid move format: {move}"}
         else:
             move_obj = move
-        
+
         # Check if move is legal
         if move_obj not in board.legal_moves:
             logger.warning(f"Illegal move: {move_obj.uci()} in position {fen}")
             return {"error": "Illegal move"}
-        
+
         # Make the move
         board.push(move_obj)
-        
+
         # Get engine evaluation with time limit or depth
-        limit = None
-        if time_limit is not None:
-            limit = chess.engine.Limit(time=time_limit)
-        else:
-            limit = chess.engine.Limit(depth=self.stockfish_depth)
-        
+        limit = chess.engine.Limit(time=time_limit) if time_limit else chess.engine.Limit(depth=self.stockfish_depth)
+
         try:
             info = self.engine.analyse(board, limit)
-            
+
             # Extract score
             score = info.get("score", None)
             if score:
-                # Convert score to numeric value from white's perspective
+                # Check if the score represents a mate
                 if score.is_mate():
-                    # Mate score
-                    mate_score = score.mate()
-                    eval_score = 999 if mate_score > 0 else -999
+                    mate_in = score.relative.mate()
+                    # Use a formula that preserves mate distance information
+                    eval_score = (10000 - abs(mate_in)) * (1 if mate_in > 0 else -1)
+                    eval_text = f"M{abs(mate_in)}"
                 else:
                     # Regular score in centipawns
                     eval_score = score.white().score() / 100.0
-                    
+
                 # Extract depth
                 depth = info.get("depth", 0)
-                
+
                 return {
                     "move": move_obj.uci(),
                     "evaluation": eval_score,
                     "depth": depth,
                     "mate": score.is_mate(),
-                    "mate_in": score.mate() if score.is_mate() else None
+                    "mate_in": mate_in
                 }
             else:
                 return {"error": "No score returned"}
         except Exception as e:
             logger.error(f"Error during Stockfish analysis: {e}")
             return {"error": str(e)}
-    
+     
     def evaluate_position(self, fen: str, time_limit: Optional[float] = None) -> Dict:
         """
         Evaluate the current position with Stockfish.
@@ -217,13 +206,13 @@ class ChessSelectionAgent:
             if score:
                 # Convert score to numeric value
                 if score.is_mate():
-                    mate_score = score.mate()
-                    eval_score = 999 if mate_score > 0 else -999
-                    eval_text = f"Mate in {abs(mate_score)}" if mate_score > 0 else f"Mated in {abs(mate_score)}"
+                    mate_in = score.relative.mate()
+                    # Use a formula that preserves mate distance information
+                    eval_score = (10000 - abs(mate_in)) * (1 if mate_in > 0 else -1)
+                    eval_text = f"M{abs(mate_in)}"
                 else:
                     # Regular score in centipawns
                     eval_score = score.white().score() / 100.0
-                    eval_text = f"{eval_score:+.2f}"
                 
                 # Extract principal variation if available
                 pv = info.get("pv", [])
@@ -251,26 +240,19 @@ class ChessSelectionAgent:
     def get_stockfish_top_moves(self, fen: str, num_moves: int = 3) -> List[Dict]:
         """
         Get top moves from Stockfish.
-        
-        Args:
-            fen: FEN notation of the position
-            num_moves: Number of top moves to return
-            
-        Returns:
-            List of top moves with evaluations
         """
         board = chess.Board(fen)
-        
+
         # Set limit
         limit = chess.engine.Limit(depth=self.stockfish_depth)
-        
+
         try:
             # Get multipv analysis
             result = self.engine.analyse(board, limit, multipv=num_moves)
-            
+
             # Process results
             moves = []
-            
+
             # Handle multipv results
             if isinstance(result, list):
                 for pvIdx, info in enumerate(result):
@@ -278,16 +260,19 @@ class ChessSelectionAgent:
                     if pv:
                         move = pv[0]
                         score = info.get("score", None)
-                        
+
                         if score:
+                            eval_text = ""  # Initialize eval_text variable
                             if score.is_mate():
-                                mate_score = score.mate()
-                                eval_score = 999 if mate_score > 0 else -999
-                                eval_text = f"Mate in {abs(mate_score)}"
+                                mate_in = score.relative.mate()
+                                # Use a formula that preserves mate distance information
+                                eval_score = (10000 - abs(mate_in)) * (1 if mate_in > 0 else -1)
+                                eval_text = f"M{abs(mate_in)}"
                             else:
+                                # Regular score in centipawns
                                 eval_score = score.white().score() / 100.0
-                                eval_text = f"{eval_score:+.2f}"
-                            
+                                eval_text = f"{eval_score:+.2f}"  # Format regular score with +/- sign
+
                             moves.append({
                                 "move": move.uci(),
                                 "san": board.san(move),
@@ -296,37 +281,12 @@ class ChessSelectionAgent:
                                 "depth": info.get("depth", 0),
                                 "rank": pvIdx + 1
                             })
-            # Handle single result
-            else:
-                pv = result.get("pv", [])
-                if pv:
-                    move = pv[0]
-                    score = result.get("score", None)
-                    
-                    if score:
-                        if score.is_mate():
-                            mate_score = score.mate()
-                            eval_score = 999 if mate_score > 0 else -999
-                            eval_text = f"Mate in {abs(mate_score)}"
-                        else:
-                            eval_score = score.white().score() / 100.0
-                            eval_text = f"{eval_score:+.2f}"
-                        
-                        moves.append({
-                            "move": move.uci(),
-                            "san": board.san(move),
-                            "evaluation": eval_score,
-                            "evaluation_text": eval_text,
-                            "depth": result.get("depth", 0),
-                            "rank": 1
-                        })
-            
             return moves
-            
+
         except Exception as e:
             logger.error(f"Error getting top moves: {e}")
             return []
-    
+
     def rank_moves(self, fen: str, retrieved_knowledge: List[Dict]) -> List[Dict]:
         """
         Rank candidate moves based on retrieved knowledge and Stockfish evaluation.
@@ -338,10 +298,21 @@ class ChessSelectionAgent:
         Returns:
             Ranked list of moves with evaluations
         """
+        # At the beginning of rank_moves method:
         board = chess.Board(fen)
-        
+
+        # Check for terminal positions
+        if board.is_checkmate():
+            return [{"move": "checkmate", "san": "Checkmate", "final_score": 1.0, "source": "terminal"}]
+        elif board.is_stalemate():
+            return [{"move": "stalemate", "san": "Stalemate", "final_score": 0.5, "source": "terminal"}]
+        elif board.is_insufficient_material():
+            return [{"move": "draw", "san": "Draw (insufficient material)", "final_score": 0.5, "source": "terminal"}]
+
         # Get all legal moves
         legal_moves = list(board.legal_moves)
+        if not legal_moves:
+            return [{"move": "no_moves", "san": "No legal moves", "final_score": 0.0, "source": "terminal"}]
         move_candidates = []
         
         # First, add moves from retrieved knowledge
@@ -441,17 +412,20 @@ class ChessSelectionAgent:
         # Calculate final score
         # Blend engine evaluation with retrieval confidence
         for candidate in move_candidates:
-            # Normalize engine evaluation to -1 to 1 range if it's extreme
             engine_eval = candidate.get("engine_evaluation", 0.0)
-            if engine_eval > 10:
-                engine_eval = 10.0
-            elif engine_eval < -10:
-                engine_eval = -10.0
-                
-            # Convert to 0-1 range for blending (higher is better)
-            normalized_eval = (engine_eval + 10) / 20.0
             
-            # Blend scores - 80% engine, 20% retrieval
+            # Special handling for mate scores
+            if abs(engine_eval) > 9000:  # This is likely a mate score
+                # Preserve mate information when calculating final score
+                # Give it maximum priority but still respect mate distance
+                normalized_eval = 0.95 + (0.05 * (10000 - abs(engine_eval)) / 1000)
+                if engine_eval < 0:
+                    normalized_eval = 1 - normalized_eval  # Invert for negative evals
+            else:
+                # Standard normalization for regular evals
+                normalized_eval = min(max((engine_eval + 10) / 20.0, 0), 1)
+                
+            # Blend scores - 80% engine, 20% retrieval 
             retrieval_conf = candidate.get("retrieval_confidence", 0.0)
             final_score = 0.8 * normalized_eval + 0.2 * retrieval_conf
             
@@ -581,16 +555,23 @@ class ChessSelectionAgent:
                     }
                     
                     # Determine quality based on difference
-                    if abs(eval_diff) < 0.1:
+                    # Replace the quality assessment code with:
+# Determine quality based on difference
+                if abs(eval_diff) > 9000:  # Mate-related difference
+                    if eval_diff > 0:  # Best move leads to faster mate than human move
+                        human_move_analysis["quality"] = "Suboptimal Mate"
+                    else:  # Human found faster mate
                         human_move_analysis["quality"] = "Excellent"
-                    elif abs(eval_diff) < 0.3:
-                        human_move_analysis["quality"] = "Good"
-                    elif abs(eval_diff) < 0.7:
-                        human_move_analysis["quality"] = "Inaccuracy"
-                    elif abs(eval_diff) < 1.5:
-                        human_move_analysis["quality"] = "Mistake"
-                    else:
-                        human_move_analysis["quality"] = "Blunder"
+                elif abs(eval_diff) < 0.1:
+                    human_move_analysis["quality"] = "Excellent"
+                elif abs(eval_diff) < 0.3:
+                    human_move_analysis["quality"] = "Good"
+                elif abs(eval_diff) < 0.7:
+                    human_move_analysis["quality"] = "Inaccuracy"
+                elif abs(eval_diff) < 1.5:
+                    human_move_analysis["quality"] = "Mistake"
+                else:
+                    human_move_analysis["quality"] = "Blunder"
             except ValueError:
                 human_move_analysis = {"error": "Invalid move format"}
                 
@@ -614,62 +595,3 @@ class ChessSelectionAgent:
         if hasattr(self, 'engine') and self.engine:
             self.engine.quit()
 
-# Example usage
-def run_selection_agent(fen, human_move=None):
-    """Run the selection agent with the specified file structure"""
-    
-    # First create the retrieval agent
-    retrieval_agent = ChessRetrievalAgent(
-        index_path="/Users/lakshmikamath/Desktop/tdl/knowledge-base/chess_positions.index",
-        embeddings_path="/Users/lakshmikamath/Desktop/tdl/knowledge-base/raw_positions.pkl",
-        metadata_path="/Users/lakshmikamath/Desktop/tdl/knowledge-base/positions_metadata.pkl",
-        model_name="all-MiniLM-L6-v2",
-        top_k=5
-    )
-    
-    # Then create the selection agent
-    selection_agent = ChessSelectionAgent(
-        retrieval_agent=retrieval_agent,
-        stockfish_path="/opt/homebrew/bin/stockfish",  # Path to Stockfish engine
-        gemini_api_key="your_Api_key",  # Gemini API key
-        stockfish_depth=14
-    )
-    
-    try:
-        # Get move suggestion
-        result = selection_agent.suggest_move(fen, human_move)
-        
-        if "error" in result:
-            print(f"Error: {result['error']}")
-            return None
-        
-        # Print the result
-        print(f"Position analysis:")
-        print(result["gemini_analysis"])
-        
-        # Print top moves
-        print("\nTop recommended moves:")
-        for i, move in enumerate(result["top_moves"]):
-            print(f"{i+1}. {move['san']} (Eval: {move.get('engine_evaluation', 0.0):+.2f})")
-        
-        # Print human move analysis if available
-        if result["human_move_analysis"] and "error" not in result["human_move_analysis"]:
-            human = result["human_move_analysis"]
-            print(f"\nYour move {human['san']} is: {human['quality']}")
-            print(f"Evaluation difference from best move: {human['diff_from_best']:+.2f}")
-        
-        return result
-    finally:
-        # Clean up
-        selection_agent.close()
-
-# Example with starting position
-if __name__ == "__main__":
-    # Starting position
-    fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
-    
-    # Human wants to play e4
-    human_move = "Bc4"
-    
-    # Get suggestion
-    result = run_selection_agent(fen, human_move)
