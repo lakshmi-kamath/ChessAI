@@ -19,7 +19,7 @@ class ChessDebateAgent:
     
     def __init__(
         self,
-        stockfish_path: str,
+        engine_manager,  # Changed parameter type
         gemini_api_key: str,
         stockfish_depth: int = 14,
         temperature: float = 0.7,  # Higher temperature for more creative debates
@@ -29,13 +29,13 @@ class ChessDebateAgent:
         Initialize the Chess Debate Agent.
         
         Args:
-            stockfish_path: Path to Stockfish engine executable
+            engine_manager: Shared ChessEngineManager instance
             gemini_api_key: API key for Gemini LLM
             stockfish_depth: Depth for Stockfish analysis
             temperature: Temperature for LLM generation
             debate_styles: List of chess styles/approaches for the debate
         """
-        self.stockfish_path = stockfish_path
+        self.engine_manager = engine_manager  # Store engine manager reference
         self.stockfish_depth = stockfish_depth
         self.temperature = temperature
         
@@ -47,14 +47,6 @@ class ChessDebateAgent:
             "Endgame Specialist"
         ]
         
-        # Initialize Stockfish engine
-        logger.info(f"Initializing Stockfish engine from {stockfish_path}")
-        try:
-            self.engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-        except Exception as e:
-            logger.error(f"Failed to initialize Stockfish engine: {e}")
-            raise
-        
         # Initialize Gemini
         logger.info("Initializing Gemini LLM")
         genai.configure(api_key=gemini_api_key)
@@ -64,6 +56,7 @@ class ChessDebateAgent:
         )
         
         logger.info("Chess Debate Agent initialized successfully")
+        
     
     def get_stockfish_evaluation(self, fen: str) -> Dict:
         """
@@ -81,8 +74,8 @@ class ChessDebateAgent:
         limit = chess.engine.Limit(depth=self.stockfish_depth)
         
         try:
-            # Get the evaluation and principal variation
-            info = self.engine.analyse(board, limit, multipv=3)
+            # Get the evaluation and principal variation using the shared engine
+            info = self.engine_manager.analyze(board, limit, multipv=3)
             
             # Process results for multiple lines
             if isinstance(info, list):
@@ -151,6 +144,7 @@ class ChessDebateAgent:
         except Exception as e:
             logger.error(f"Error during Stockfish analysis: {e}")
             return {"error": str(e)}
+    
     
     def _create_debate_prompt(self, fen: str, stockfish_eval: Dict, num_perspectives: int = 2) -> str:
         """
@@ -368,7 +362,7 @@ Keep the debate focused specifically on the move {move_san} and its implications
             logger.error(f"Error generating move debate: {e}")
             return {"error": f"Failed to generate debate: {str(e)}"}
     
-    def close(self):
-        """Clean up resources"""
-        if hasattr(self, 'engine') and self.engine:
-            self.engine.quit()
+    # def close(self):
+    #     """Clean up resources"""
+    #     if hasattr(self, 'engine') and self.engine:
+    #         self.engine.quit()
